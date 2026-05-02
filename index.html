@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SERUMS 2026-I — Adjudicación Medicina</title>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+<style>
+:root {
+  --bg: #0d1117;
+  --bg2: #161b22;
+  --bg3: #21262d;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text2: #8b949e;
+  --blue: #2563eb;
+  --blue-light: #3b82f6;
+  --green: #16a34a;
+  --green-light: #22c55e;
+  --red: #dc2626;
+  --red-light: #ef4444;
+  --yellow: #d97706;
+  --yellow-light: #f59e0b;
+  --purple: #7c3aed;
+  --radius: 8px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; min-height: 100vh; }
+
+/* Header */
+#header {
+  position: sticky; top: 0; z-index: 100;
+  background: var(--bg2); border-bottom: 1px solid var(--border);
+  padding: 12px 20px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+}
+#header h1 { font-size: 18px; font-weight: 700; color: var(--text); white-space: nowrap; }
+#header h1 span { color: var(--blue-light); }
+.stats { display: flex; gap: 12px; flex-wrap: wrap; }
+.stat { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 14px; text-align: center; }
+.stat-num { font-size: 20px; font-weight: 700; line-height: 1.2; }
+.stat-label { font-size: 11px; color: var(--text2); }
+.stat-aptos .stat-num { color: var(--text); }
+.stat-adj .stat-num { color: var(--blue-light); }
+.stat-ocup .stat-num { color: var(--red-light); }
+.stat-libre .stat-num { color: var(--green-light); }
+.live-badge { display: flex; align-items: center; gap: 6px; color: var(--red-light); font-size: 13px; font-weight: 600; margin-left: auto; }
+.live-dot { width: 8px; height: 8px; background: var(--red-light); border-radius: 50%; animation: pulse 1.5s infinite; }
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+
+/* Tabs */
+#tabs { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 20px; display: flex; align-items: center; gap: 4px; }
+.tab-btn { padding: 10px 16px; background: none; border: none; color: var(--text2); cursor: pointer; font-size: 14px; border-bottom: 2px solid transparent; transition: all .15s; }
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { color: var(--blue-light); border-bottom-color: var(--blue-light); }
+.tab-spacer { flex: 1; }
+.export-btn { margin: 4px 0; padding: 6px 14px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); cursor: pointer; font-size: 13px; }
+.export-btn:hover { background: var(--border); }
+
+/* Content */
+.panel { display: none; height: calc(100vh - 115px); overflow: hidden; flex-direction: column; }
+.panel.active { display: flex; }
+
+/* Search / Filters */
+.filters { padding: 12px 20px; background: var(--bg2); border-bottom: 1px solid var(--border); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.filters input, .filters select {
+  background: var(--bg3); border: 1px solid var(--border); color: var(--text);
+  padding: 7px 10px; border-radius: var(--radius); font-size: 13px; min-width: 140px;
+}
+.filters input::placeholder { color: var(--text2); }
+.filters input:focus, .filters select:focus { outline: none; border-color: var(--blue); }
+.filters select option { background: var(--bg3); }
+
+/* Candidatos list */
+#candidatos-scroll { flex: 1; overflow-y: auto; padding: 0; }
+.cand-item {
+  display: flex; align-items: center; gap: 12px; padding: 10px 20px;
+  border-bottom: 1px solid var(--border); transition: background .1s;
+}
+.cand-item:hover { background: var(--bg2); }
+.cand-item.adjudicado { opacity: 0.6; }
+.cand-item.no-adjudico { opacity: 0.4; }
+.cand-rank { width: 52px; font-size: 13px; color: var(--text2); font-weight: 600; flex-shrink: 0; }
+.cand-rank.current { color: var(--yellow-light); }
+.cand-info { flex: 1; min-width: 0; }
+.cand-name { font-weight: 600; font-size: 14px; }
+.cand-name.discapacidad::after { content: " ♿"; font-size: 12px; color: var(--purple); }
+.cand-meta { color: var(--text2); font-size: 12px; margin-top: 2px; }
+.cand-status { flex-shrink: 0; }
+.badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+.badge-wait { background: rgba(217,119,6,.15); color: var(--yellow-light); }
+.badge-ok { background: rgba(22,163,74,.15); color: var(--green-light); }
+.badge-no { background: rgba(220,38,38,.15); color: var(--red-light); }
+.badge-skip { background: rgba(139,148,158,.1); color: var(--text2); }
+.adj-btn { padding: 6px 14px; background: var(--blue); border: none; border-radius: var(--radius); color: white; cursor: pointer; font-size: 13px; white-space: nowrap; }
+.adj-btn:hover { background: var(--blue-light); }
+.adj-details { font-size: 12px; color: var(--green-light); margin-top: 3px; }
+
+/* Plazas table */
+#plazas-scroll { flex: 1; overflow-y: auto; }
+table { width: 100%; border-collapse: collapse; }
+thead tr { position: sticky; top: 0; background: var(--bg2); z-index: 10; }
+th { padding: 10px 12px; text-align: left; font-size: 12px; color: var(--text2); font-weight: 600; border-bottom: 1px solid var(--border); white-space: nowrap; }
+td { padding: 9px 12px; border-bottom: 1px solid rgba(48,54,61,.5); font-size: 13px; white-space: nowrap; }
+tr:hover td { background: rgba(255,255,255,.02); }
+.plaza-libre td { }
+.plaza-tomada td { text-decoration: line-through; opacity: 0.45; }
+.plaza-tomada .no-cross { text-decoration: none; opacity: 1; }
+.gd2 { color: #86efac; }
+.gd3 { color: #fde047; }
+.gd4 { color: #fb923c; }
+.gd5 { color: #f87171; }
+.zaf-si { color: var(--purple); font-weight: 600; }
+.ze-si { color: #38bdf8; font-weight: 600; }
+
+/* Historial */
+#historial-scroll { flex: 1; overflow-y: auto; padding: 20px; }
+.hist-item { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 16px; margin-bottom: 8px; display: flex; gap: 14px; align-items: flex-start; }
+.hist-num { font-size: 20px; font-weight: 700; color: var(--blue-light); width: 38px; flex-shrink: 0; text-align: right; }
+.hist-body { flex: 1; }
+.hist-name { font-weight: 600; font-size: 14px; }
+.hist-plaza { color: var(--green-light); margin-top: 3px; font-size: 13px; }
+.hist-meta { color: var(--text2); font-size: 12px; margin-top: 4px; }
+.hist-no .hist-plaza { color: var(--red-light); }
+.hist-time { font-size: 12px; color: var(--text2); white-space: nowrap; }
+
+/* Modal */
+#modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 200; align-items: center; justify-content: center; }
+#modal-overlay.open { display: flex; }
+#modal { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; width: 540px; max-width: 96vw; max-height: 92vh; overflow-y: auto; }
+.modal-header { padding: 20px 24px 16px; border-bottom: 1px solid var(--border); }
+.modal-title { font-size: 17px; font-weight: 700; }
+.modal-rank { color: var(--text2); font-size: 13px; margin-top: 4px; }
+.modal-opp { display: flex; gap: 8px; margin-top: 10px; }
+.opp-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border); }
+.opp-dot.used { background: var(--yellow-light); }
+.opp-dot.current { background: var(--blue-light); animation: pulse 1s infinite; }
+
+/* Timer */
+.timer-bar-wrap { margin-top: 12px; }
+.timer-label { display: flex; justify-content: space-between; font-size: 12px; color: var(--text2); margin-bottom: 4px; }
+#timer-num { font-weight: 700; font-size: 14px; color: var(--text); }
+.timer-track { height: 6px; background: var(--bg3); border-radius: 3px; overflow: hidden; }
+#timer-fill { height: 100%; background: var(--blue-light); border-radius: 3px; transition: width .5s linear, background .5s; width: 100%; }
+#timer-fill.warn { background: var(--yellow-light); }
+#timer-fill.danger { background: var(--red-light); }
+
+/* Modal body */
+.modal-body { padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; }
+.form-group label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 6px; font-weight: 600; }
+.form-group label span { color: var(--blue-light); font-size: 13px; }
+.form-group select, .form-group input {
+  width: 100%; background: var(--bg3); border: 1px solid var(--border);
+  color: var(--text); padding: 9px 12px; border-radius: var(--radius); font-size: 14px;
+}
+.form-group select:disabled { opacity: .5; cursor: not-allowed; }
+.form-group select:focus, .form-group input:focus { outline: none; border-color: var(--blue); }
+#plaza-status { margin-top: 8px; padding: 10px 14px; border-radius: var(--radius); font-size: 13px; display: none; }
+#plaza-status.ok { background: rgba(22,163,74,.15); color: var(--green-light); display: block; }
+#plaza-status.error { background: rgba(220,38,38,.15); color: var(--red-light); display: block; }
+#plaza-status.info { background: rgba(37,99,235,.15); color: var(--blue-light); display: block; }
+
+/* Modal footer */
+.modal-footer { padding: 16px 24px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; }
+#btn-confirmar { flex: 1; padding: 11px; background: var(--green); border: none; border-radius: var(--radius); color: white; cursor: pointer; font-size: 15px; font-weight: 700; }
+#btn-confirmar:hover:not(:disabled) { background: var(--green-light); }
+#btn-confirmar:disabled { opacity: .4; cursor: not-allowed; }
+#btn-pasar { padding: 11px 18px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text2); cursor: pointer; font-size: 14px; }
+#btn-pasar:hover { background: var(--border); color: var(--text); }
+#btn-cerrar-modal { padding: 11px; background: none; border: 1px solid var(--border); border-radius: var(--radius); color: var(--text2); cursor: pointer; font-size: 14px; }
+
+/* Loading */
+#loading { position: fixed; inset: 0; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 999; gap: 16px; }
+#loading h2 { color: var(--text); }
+#loading p { color: var(--text2); font-size: 13px; }
+.spinner { width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--blue-light); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Firebase warning */
+#firebase-warning {
+  background: rgba(220,38,38,.1); border: 1px solid var(--red); color: var(--red-light);
+  padding: 10px 20px; font-size: 13px; text-align: center; display: none;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text2); }
+
+.empty-msg { padding: 40px; text-align: center; color: var(--text2); }
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <h2>SERUMS 2026-I</h2>
+  <p id="loading-msg">Cargando datos...</p>
+</div>
+
+<div id="firebase-warning">
+  ⚠️ Firebase no configurado — los cambios NO se sincronizarán en tiempo real. Edita <code>firebaseConfig</code> en el código.
+</div>
+
+<div id="header">
+  <h1>SERUMS 2026-I &mdash; <span>Medicina</span></h1>
+  <div class="stats">
+    <div class="stat stat-aptos">
+      <div class="stat-num" id="stat-aptos">—</div>
+      <div class="stat-label">Aptos</div>
+    </div>
+    <div class="stat stat-adj">
+      <div class="stat-num" id="stat-adj">0</div>
+      <div class="stat-label">Adjudicaciones</div>
+    </div>
+    <div class="stat stat-ocup">
+      <div class="stat-num" id="stat-ocup">0</div>
+      <div class="stat-label">Plazas ocupadas</div>
+    </div>
+    <div class="stat stat-libre">
+      <div class="stat-num" id="stat-libre">—</div>
+      <div class="stat-label">Plazas libres</div>
+    </div>
+  </div>
+  <div class="live-badge">
+    <div class="live-dot"></div>
+    EN VIVO
+  </div>
+</div>
+
+<div id="tabs">
+  <button class="tab-btn active" onclick="showTab('candidatos')">👥 Candidatos</button>
+  <button class="tab-btn" onclick="showTab('plazas')">🏥 Plazas</button>
+  <button class="tab-btn" onclick="showTab('historial')">📋 Historial</button>
+  <div class="tab-spacer"></div>
+  <button class="export-btn" onclick="exportExcel()">⬇️ Exportar Excel</button>
+</div>
+
+<!-- PANEL: CANDIDATOS -->
+<div id="panel-candidatos" class="panel active">
+  <div class="filters">
+    <input type="text" id="search-cand" placeholder="🔍 Buscar candidato por nombre..." oninput="filterCandidatos()" style="min-width:260px;flex:1">
+    <label style="display:flex;align-items:center;gap:6px;color:var(--text2);font-size:13px;">
+      <input type="checkbox" id="hide-done" onchange="filterCandidatos()"> Ocultar ya adjudicados
+    </label>
+  </div>
+  <div id="candidatos-scroll"></div>
+</div>
+
+<!-- PANEL: PLAZAS -->
+<div id="panel-plazas" class="panel">
+  <div class="filters">
+    <input type="text" id="search-plaza" placeholder="🔍 Buscar establecimiento..." oninput="filterPlazas()" style="min-width:200px;">
+    <select id="filter-diresa" onchange="filterPlazas()"><option value="">Todas las DIRESA</option></select>
+    <select id="filter-inst" onchange="filterPlazas()"><option value="">Todas las inst.</option></select>
+    <select id="filter-prov" onchange="filterPlazas()"><option value="">Todas las prov.</option></select>
+    <select id="filter-gd" onchange="filterPlazas()"><option value="">Todos los GD</option></select>
+    <select id="filter-estado-plaza" onchange="filterPlazas()">
+      <option value="">Todas</option>
+      <option value="libre">🟢 Libres</option>
+      <option value="tomada">🔴 Tomadas</option>
+    </select>
+  </div>
+  <div id="plazas-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>DIRESA</th>
+          <th>Institución</th>
+          <th>Provincia</th>
+          <th>Distrito</th>
+          <th>Establecimiento</th>
+          <th>GD</th>
+          <th>Cat</th>
+          <th>ZAF</th>
+          <th>ZE</th>
+          <th>Estado</th>
+          <th>Adjudicado por</th>
+        </tr>
+      </thead>
+      <tbody id="plazas-tbody"></tbody>
+    </table>
+    <div id="plazas-empty" class="empty-msg" style="display:none">No se encontraron plazas con estos filtros.</div>
+  </div>
+</div>
+
+<!-- PANEL: HISTORIAL -->
+<div id="panel-historial" class="panel">
+  <div class="filters">
+    <input type="text" id="search-hist" placeholder="🔍 Buscar en historial..." oninput="renderHistorial()" style="min-width:260px;">
+  </div>
+  <div id="historial-scroll">
+    <div id="historial-list"></div>
+  </div>
+</div>
+
+<!-- MODAL ADJUDICACIÓN -->
+<div id="modal-overlay" onclick="closeModalOutside(event)">
+  <div id="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-cand-name">—</div>
+      <div class="modal-rank" id="modal-cand-meta">—</div>
+      <div class="modal-opp" id="modal-opp-dots"></div>
+      <div class="timer-bar-wrap">
+        <div class="timer-label">
+          <span>Tiempo para adjudicar</span>
+          <span id="timer-num">30s</span>
+        </div>
+        <div class="timer-track"><div id="timer-fill"></div></div>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label><span>1.</span> DIRESA / GERESA / DIRIS</label>
+        <select id="sel-diresa" onchange="onDiresaChange()"><option value="">— Seleccione —</option></select>
+      </div>
+      <div class="form-group">
+        <label><span>2.</span> Institución</label>
+        <select id="sel-inst" disabled><option value="">— Seleccione DIRESA primero —</option></select>
+      </div>
+      <div class="form-group">
+        <label><span>3.</span> Provincia</label>
+        <select id="sel-prov" onchange="onProvinciaChange()" disabled><option value="">— Seleccione DIRESA primero —</option></select>
+      </div>
+      <div class="form-group">
+        <label><span>4.</span> Distrito</label>
+        <select id="sel-dist" onchange="onDistritoChange()" disabled><option value="">— Seleccione Provincia primero —</option></select>
+      </div>
+      <div class="form-group">
+        <label><span>5.</span> Nombre del Establecimiento de Salud</label>
+        <select id="sel-estab" onchange="onEstabChange()" disabled><option value="">— Seleccione Distrito primero —</option></select>
+      </div>
+      <div id="plaza-status"></div>
+    </div>
+    <div class="modal-footer">
+      <button id="btn-cerrar-modal" onclick="closeModal()">✕</button>
+      <button id="btn-pasar" onclick="pasarAlSiguiente()">No adjudicó / Pasar</button>
+      <button id="btn-confirmar" onclick="confirmarAdjudicacion()" disabled>✓ Confirmar Adjudicación</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════
+//  FIREBASE CONFIG — REEMPLAZA CON TUS VALORES
+// ═══════════════════════════════════════════════
+const firebaseConfig = {
+  apiKey: "TU_API_KEY",
+  authDomain: "TU_PROYECTO.firebaseapp.com",
+  projectId: "TU_PROYECTO_ID",
+  storageBucket: "TU_PROYECTO.appspot.com",
+  messagingSenderId: "TU_MESSAGING_ID",
+  appId: "TU_APP_ID"
+};
+// ═══════════════════════════════════════════════
+
+const FIREBASE_CONFIGURED = !firebaseConfig.apiKey.startsWith("TU_");
+
+// ── State ─────────────────────────────────────
+let plazas = [];
+let candidatos = [];
+let adjudicaciones = {};    // { docId: {...} }
+let plazasTomadas = {};     // { plazaIndex: { adjudicado_por, numero_adjudicacion } }
+
+let modalCandidato = null;
+let modalOportunidad = 1;
+let timerInterval = null;
+let timerSeconds = 30;
+let selectedPlaza = null;
+
+let filteredCandidatos = [];
+let filteredPlazas = [];
+
+// ── Init ──────────────────────────────────────
+async function init() {
+  try {
+    setLoadingMsg("Cargando plazas...");
+    const [rPlazas, rCandidatos] = await Promise.all([
+      fetch('./data/plazas.json'),
+      fetch('./data/candidatos.json')
+    ]);
+    plazas = await rPlazas.json();
+    candidatos = await rCandidatos.json();
+
+    setLoadingMsg("Inicializando...");
+    buildLookups();
+    populateFilters();
+    updateStats();
+
+    if (FIREBASE_CONFIGURED) {
+      setLoadingMsg("Conectando a Firebase...");
+      initFirebase();
+    } else {
+      document.getElementById('firebase-warning').style.display = 'block';
+      hideLoading();
+      renderCandidatos();
+      renderPlazas();
+    }
+  } catch(e) {
+    document.getElementById('loading-msg').textContent = 'Error: ' + e.message;
+    console.error(e);
+  }
+}
+
+function setLoadingMsg(msg) {
+  document.getElementById('loading-msg').textContent = msg;
+}
+function hideLoading() {
+  document.getElementById('loading').style.display = 'none';
+}
+
+// ── Firebase ──────────────────────────────────
+let db;
+function initFirebase() {
+  firebase.initializeApp(firebaseConfig);
+  db = firebase.firestore();
+
+  let adjLoaded = false, plazasLoaded = false;
+
+  db.collection('adjudicaciones').orderBy('numero_adjudicacion', 'asc')
+    .onSnapshot(snap => {
+      adjudicaciones = {};
+      snap.forEach(doc => { adjudicaciones[doc.id] = doc.data(); });
+      if (!adjLoaded) { adjLoaded = true; checkBothLoaded(); }
+      updateStats();
+      renderCandidatos();
+      renderHistorial();
+    }, err => {
+      console.error('Firestore adjudicaciones error:', err);
+      document.getElementById('firebase-warning').style.display = 'block';
+      document.getElementById('firebase-warning').textContent = '⚠️ Error Firestore: ' + err.message;
+    });
+
+  db.collection('plazas_tomadas')
+    .onSnapshot(snap => {
+      plazasTomadas = {};
+      snap.forEach(doc => { plazasTomadas[doc.id] = doc.data(); });
+      if (!plazasLoaded) { plazasLoaded = true; checkBothLoaded(); }
+      updateStats();
+      renderPlazas();
+      if (modalCandidato && selectedPlaza) onEstabChange();
+    });
+
+  function checkBothLoaded() {
+    if (adjLoaded && plazasLoaded) {
+      hideLoading();
+      renderCandidatos();
+      renderPlazas();
+      renderHistorial();
+    }
+  }
+}
+
+// ── Lookups ───────────────────────────────────
+let diresaMap = {};   // diresa → prov → dist → [plazas]
+let instByDiresa = {}; // diresa → Set(instituciones)
+
+function buildLookups() {
+  diresaMap = {};
+  instByDiresa = {};
+  for (const p of plazas) {
+    if (!diresaMap[p.diresa]) diresaMap[p.diresa] = {};
+    if (!diresaMap[p.diresa][p.provincia]) diresaMap[p.diresa][p.provincia] = {};
+    if (!diresaMap[p.diresa][p.provincia][p.distrito]) diresaMap[p.diresa][p.provincia][p.distrito] = [];
+    diresaMap[p.diresa][p.provincia][p.distrito].push(p);
+
+    if (!instByDiresa[p.diresa]) instByDiresa[p.diresa] = new Set();
+    if (p.institucion) instByDiresa[p.diresa].add(p.institucion);
+  }
+}
+
+function populateFilters() {
+  const diresas = Object.keys(diresaMap).sort();
+  const allInst = [...new Set(plazas.map(p => p.institucion).filter(Boolean))].sort();
+  const allProv = [...new Set(plazas.map(p => p.provincia).filter(Boolean))].sort();
+  const allGD = [...new Set(plazas.map(p => p.grado_dificultad).filter(Boolean))].sort();
+
+  const fDiresa = document.getElementById('filter-diresa');
+  diresas.forEach(d => fDiresa.insertAdjacentHTML('beforeend', `<option value="${esc(d)}">${esc(d)}</option>`));
+
+  const fInst = document.getElementById('filter-inst');
+  allInst.forEach(i => fInst.insertAdjacentHTML('beforeend', `<option value="${esc(i)}">${esc(i)}</option>`));
+
+  const fProv = document.getElementById('filter-prov');
+  allProv.forEach(p => fProv.insertAdjacentHTML('beforeend', `<option value="${esc(p)}">${esc(p)}</option>`));
+
+  const fGd = document.getElementById('filter-gd');
+  allGD.forEach(g => fGd.insertAdjacentHTML('beforeend', `<option value="${esc(g)}">${esc(g)}</option>`));
+
+  // Modal DIRESA
+  const selDiresa = document.getElementById('sel-diresa');
+  diresas.forEach(d => selDiresa.insertAdjacentHTML('beforeend', `<option value="${esc(d)}">${esc(d)}</option>`));
+}
+
+// ── Stats ─────────────────────────────────────
+function updateStats() {
+  const totalAdj = Object.values(adjudicaciones).filter(a => a.estado === 'adjudicado').length;
+  const totalPlazasOcupadas = Object.keys(plazasTomadas).length;
+  document.getElementById('stat-aptos').textContent = candidatos.length.toLocaleString('es-PE');
+  document.getElementById('stat-adj').textContent = totalAdj.toLocaleString('es-PE');
+  document.getElementById('stat-ocup').textContent = totalPlazasOcupadas.toLocaleString('es-PE');
+  document.getElementById('stat-libre').textContent = (plazas.length - totalPlazasOcupadas).toLocaleString('es-PE');
+}
+
+// ── Helpers ───────────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function getCandAdjudicacion(rank) {
+  return Object.values(adjudicaciones).find(a => a.candidato_rank === rank) || null;
+}
+function getPlazaTomada(plazaIndex) {
+  return plazasTomadas[String(plazaIndex)] || null;
+}
+function gdClass(gd) {
+  const m = { 'GD-2': 'gd2', 'GD-3': 'gd3', 'GD-4': 'gd4', 'GD-5': 'gd5' };
+  return m[gd] || '';
+}
+
+// ── Tabs ──────────────────────────────────────
+function showTab(name) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+  event.currentTarget.classList.add('active');
+  if (name === 'historial') renderHistorial();
+}
+
+// ── Candidatos ────────────────────────────────
+let candRenderDebounce = null;
+function filterCandidatos() {
+  clearTimeout(candRenderDebounce);
+  candRenderDebounce = setTimeout(renderCandidatos, 80);
+}
+
+function renderCandidatos() {
+  const search = document.getElementById('search-cand').value.toLowerCase().trim();
+  const hideDone = document.getElementById('hide-done').checked;
+
+  filteredCandidatos = candidatos.filter(c => {
+    const adj = getCandAdjudicacion(c.rank);
+    if (hideDone && adj) return false;
+    if (search && !c.apellidos_nombres.toLowerCase().includes(search)) return false;
+    return true;
+  });
+
+  const container = document.getElementById('candidatos-scroll');
+  if (filteredCandidatos.length === 0) {
+    container.innerHTML = '<div class="empty-msg">No se encontraron candidatos.</div>';
+    return;
+  }
+
+  // Render up to 400 at a time (virtual-like)
+  const limit = 500;
+  const html = filteredCandidatos.slice(0, limit).map(c => candidatoHtml(c)).join('');
+  const more = filteredCandidatos.length > limit
+    ? `<div class="empty-msg" style="cursor:pointer" onclick="showMoreCandidatos()">Mostrando ${limit} de ${filteredCandidatos.length}. Haz clic para ver todos...</div>`
+    : '';
+  container.innerHTML = html + more;
+}
+
+function showMoreCandidatos() {
+  const container = document.getElementById('candidatos-scroll');
+  const html = filteredCandidatos.map(c => candidatoHtml(c)).join('');
+  container.innerHTML = html;
+}
+
+function candidatoHtml(c) {
+  const adj = getCandAdjudicacion(c.rank);
+  let statusClass = '', statusBadge = '', details = '', btnHtml = '';
+
+  if (adj) {
+    if (adj.estado === 'adjudicado') {
+      statusClass = 'adjudicado';
+      statusBadge = `<span class="badge badge-ok">✓ Adjudicó</span>`;
+      details = `<div class="adj-details">${esc(adj.establecimiento)} · ${esc(adj.provincia)}</div>`;
+    } else {
+      statusClass = 'no-adjudico';
+      statusBadge = `<span class="badge badge-no">✕ No adjudicó</span>`;
+    }
+  } else {
+    statusBadge = `<span class="badge badge-wait">⏳ En espera</span>`;
+    btnHtml = `<button class="adj-btn" onclick="openModal(${c.rank})">Registrar adjudicación</button>`;
+  }
+
+  const puntaje = Number(c.puntaje_final).toLocaleString('es-PE');
+  const discCls = c.observacion && c.observacion.toLowerCase().includes('discapacidad') ? ' discapacidad' : '';
+
+  return `<div class="cand-item ${statusClass}">
+    <div class="cand-rank">#${c.rank}</div>
+    <div class="cand-info">
+      <div class="cand-name${discCls}">${esc(c.apellidos_nombres)}</div>
+      <div class="cand-meta">Puntaje: ${puntaje}${c.observacion ? ' · ' + esc(c.observacion) : ''}</div>
+      ${details}
+    </div>
+    <div class="cand-status">${statusBadge}</div>
+    ${btnHtml}
+  </div>`;
+}
+
+// ── Plazas ────────────────────────────────────
+let plazasRenderDebounce = null;
+function filterPlazas() {
+  clearTimeout(plazasRenderDebounce);
+  plazasRenderDebounce = setTimeout(renderPlazas, 80);
+}
+
+function renderPlazas() {
+  const search = document.getElementById('search-plaza').value.toLowerCase().trim();
+  const fDiresa = document.getElementById('filter-diresa').value;
+  const fInst = document.getElementById('filter-inst').value;
+  const fProv = document.getElementById('filter-prov').value;
+  const fGd = document.getElementById('filter-gd').value;
+  const fEstado = document.getElementById('filter-estado-plaza').value;
+
+  filteredPlazas = plazas.filter(p => {
+    const tomada = !!getPlazaTomada(p.index);
+    if (fEstado === 'libre' && tomada) return false;
+    if (fEstado === 'tomada' && !tomada) return false;
+    if (fDiresa && p.diresa !== fDiresa) return false;
+    if (fInst && p.institucion !== fInst) return false;
+    if (fProv && p.provincia !== fProv) return false;
+    if (fGd && p.grado_dificultad !== fGd) return false;
+    if (search && !p.nombre_establecimiento.toLowerCase().includes(search)
+        && !p.provincia.toLowerCase().includes(search)
+        && !p.distrito.toLowerCase().includes(search)) return false;
+    return true;
+  });
+
+  const tbody = document.getElementById('plazas-tbody');
+  const empty = document.getElementById('plazas-empty');
+
+  if (filteredPlazas.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  const limit = 800;
+  const rows = filteredPlazas.slice(0, limit).map(p => plazaRow(p)).join('');
+  tbody.innerHTML = rows;
+  if (filteredPlazas.length > limit) {
+    tbody.insertAdjacentHTML('beforeend',
+      `<tr><td colspan="12" style="text-align:center;color:var(--text2);padding:12px">
+       Mostrando ${limit} de ${filteredPlazas.length} resultados. Usa filtros para acotar.
+       </td></tr>`);
+  }
+}
+
+function plazaRow(p) {
+  const tomada = getPlazaTomada(p.index);
+  const cls = tomada ? 'plaza-tomada' : 'plaza-libre';
+  const estadoBadge = tomada
+    ? `<span class="badge badge-no">🔴 Tomada</span>`
+    : `<span class="badge badge-ok">🟢 Libre</span>`;
+  const adjNombre = tomada ? `<small style="color:var(--text2)">${esc(tomada.adjudicado_por || '')}</small>` : '';
+  const gdCls = gdClass(p.grado_dificultad);
+  const zafCls = p.zaf === 'SI' ? 'zaf-si' : '';
+  const zeCls = p.ze === 'SI' ? 'ze-si' : '';
+  const num = tomada ? `<strong style="color:var(--blue-light)">#${tomada.numero_adjudicacion}</strong>` : `<span style="color:var(--border)">${p.index + 1}</span>`;
+
+  return `<tr class="${cls}">
+    <td>${num}</td>
+    <td>${esc(p.diresa)}</td>
+    <td>${esc(p.institucion)}</td>
+    <td>${esc(p.provincia)}</td>
+    <td>${esc(p.distrito)}</td>
+    <td><strong>${esc(p.nombre_establecimiento)}</strong></td>
+    <td class="${gdCls}">${esc(p.grado_dificultad)}</td>
+    <td>${esc(p.categoria)}</td>
+    <td class="${zafCls}">${p.zaf === 'SI' ? 'Sí' : ''}</td>
+    <td class="${zeCls}">${p.ze === 'SI' ? 'Sí' : ''}</td>
+    <td class="no-cross">${estadoBadge}</td>
+    <td class="no-cross">${adjNombre}</td>
+  </tr>`;
+}
+
+// ── Historial ─────────────────────────────────
+function renderHistorial() {
+  const search = document.getElementById('search-hist').value.toLowerCase().trim();
+  const sorted = Object.values(adjudicaciones)
+    .sort((a, b) => a.numero_adjudicacion - b.numero_adjudicacion);
+
+  const filtered = sorted.filter(a => {
+    if (!search) return true;
+    return a.candidato_nombre.toLowerCase().includes(search)
+      || (a.establecimiento || '').toLowerCase().includes(search)
+      || (a.provincia || '').toLowerCase().includes(search);
+  });
+
+  const list = document.getElementById('historial-list');
+  if (filtered.length === 0) {
+    list.innerHTML = '<div class="empty-msg">No hay adjudicaciones registradas aún.</div>';
+    return;
+  }
+
+  list.innerHTML = filtered.map(a => {
+    const isAdj = a.estado === 'adjudicado';
+    const ts = a.timestamp ? new Date(a.timestamp.seconds * 1000).toLocaleTimeString('es-PE') : '—';
+    const plazaInfo = isAdj
+      ? `<div class="hist-plaza">✓ ${esc(a.nombre_establecimiento || a.establecimiento || '')} — ${esc(a.provincia || '')} / ${esc(a.distrito || '')}</div>
+         <div class="hist-meta">${esc(a.diresa || '')} · ${esc(a.institucion || '')} · ${esc(a.grado_dificultad || '')} · ${esc(a.categoria || '')}</div>`
+      : `<div class="hist-plaza">✕ No adjudicó</div>`;
+
+    const oppLabel = a.oportunidades_usadas > 1 ? ` · ${a.oportunidades_usadas}ª oportunidad` : '';
+
+    return `<div class="hist-item ${isAdj ? '' : 'hist-no'}">
+      <div class="hist-num">${a.numero_adjudicacion}</div>
+      <div class="hist-body">
+        <div class="hist-name">#${a.candidato_rank} ${esc(a.candidato_nombre)}</div>
+        ${plazaInfo}
+        <div class="hist-meta">Puntaje: ${Number(a.candidato_puntaje || 0).toLocaleString('es-PE')}${oppLabel}</div>
+      </div>
+      <div class="hist-time">${ts}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── Modal ─────────────────────────────────────
+function openModal(rank, oportunidad = 1) {
+  const c = candidatos.find(x => x.rank === rank);
+  if (!c) return;
+  modalCandidato = c;
+  modalOportunidad = oportunidad;
+  selectedPlaza = null;
+
+  document.getElementById('modal-cand-name').textContent = c.apellidos_nombres;
+  const puntaje = Number(c.puntaje_final).toLocaleString('es-PE');
+  const disc = c.observacion ? ` · ${c.observacion}` : '';
+  document.getElementById('modal-cand-meta').textContent = `#${c.rank} · Puntaje: ${puntaje}${disc}`;
+
+  const dots = document.getElementById('modal-opp-dots');
+  dots.innerHTML = '';
+  for (let i = 1; i <= 3; i++) {
+    const cls = i < oportunidad ? 'opp-dot used' : i === oportunidad ? 'opp-dot current' : 'opp-dot';
+    dots.insertAdjacentHTML('beforeend', `<div class="${cls}" title="Oportunidad ${i}"></div>`);
+  }
+
+  resetModalForm();
+  document.getElementById('modal-overlay').classList.add('open');
+  startTimer();
+}
+
+function resetModalForm() {
+  document.getElementById('sel-diresa').value = '';
+  resetDropdown('sel-inst', '— Seleccione DIRESA primero —');
+  resetDropdown('sel-prov', '— Seleccione DIRESA primero —');
+  resetDropdown('sel-dist', '— Seleccione Provincia primero —');
+  resetDropdown('sel-estab', '— Seleccione Distrito primero —');
+  document.getElementById('sel-inst').disabled = true;
+  document.getElementById('sel-prov').disabled = true;
+  document.getElementById('sel-dist').disabled = true;
+  document.getElementById('sel-estab').disabled = true;
+  document.getElementById('plaza-status').className = '';
+  document.getElementById('plaza-status').style.display = 'none';
+  document.getElementById('btn-confirmar').disabled = true;
+  selectedPlaza = null;
+}
+
+function resetDropdown(id, placeholder) {
+  const sel = document.getElementById(id);
+  sel.innerHTML = `<option value="">${placeholder}</option>`;
+  sel.disabled = true;
+}
+
+function closeModal() {
+  stopTimer();
+  document.getElementById('modal-overlay').classList.remove('open');
+  modalCandidato = null;
+  selectedPlaza = null;
+}
+
+function closeModalOutside(e) {
+  if (e.target === document.getElementById('modal-overlay')) closeModal();
+}
+
+// ── Timer ─────────────────────────────────────
+function startTimer() {
+  stopTimer();
+  timerSeconds = 30;
+  updateTimerDisplay();
+  timerInterval = setInterval(() => {
+    timerSeconds--;
+    updateTimerDisplay();
+    if (timerSeconds <= 0) {
+      stopTimer();
+      document.getElementById('btn-confirmar').disabled = true;
+    }
+  }, 1000);
+}
+
+function stopTimer() {
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+}
+
+function updateTimerDisplay() {
+  const fill = document.getElementById('timer-fill');
+  const num = document.getElementById('timer-num');
+  const pct = (timerSeconds / 30) * 100;
+  fill.style.width = pct + '%';
+  num.textContent = timerSeconds + 's';
+  fill.className = timerSeconds <= 10 ? 'danger' : timerSeconds <= 20 ? 'warn' : '';
+  num.style.color = timerSeconds <= 10 ? 'var(--red-light)' : timerSeconds <= 20 ? 'var(--yellow-light)' : 'var(--text)';
+}
+
+// ── Cascading dropdowns ───────────────────────
+function onDiresaChange() {
+  const diresa = document.getElementById('sel-diresa').value;
+  resetDropdown('sel-inst', '— Seleccione —');
+  resetDropdown('sel-prov', '— Seleccione —');
+  resetDropdown('sel-dist', '— Seleccione Provincia primero —');
+  resetDropdown('sel-estab', '— Seleccione Distrito primero —');
+  document.getElementById('btn-confirmar').disabled = true;
+  selectedPlaza = null;
+
+  if (!diresa) return;
+
+  // Instituciones
+  const insts = [...(instByDiresa[diresa] || [])].sort();
+  const selInst = document.getElementById('sel-inst');
+  selInst.disabled = false;
+  insts.forEach(i => selInst.insertAdjacentHTML('beforeend', `<option value="${esc(i)}">${esc(i)}</option>`));
+
+  // Provincias
+  const provs = Object.keys(diresaMap[diresa] || {}).sort();
+  const selProv = document.getElementById('sel-prov');
+  selProv.disabled = false;
+  provs.forEach(p => selProv.insertAdjacentHTML('beforeend', `<option value="${esc(p)}">${esc(p)}</option>`));
+
+  clearPlazaStatus();
+}
+
+function onProvinciaChange() {
+  const diresa = document.getElementById('sel-diresa').value;
+  const prov = document.getElementById('sel-prov').value;
+  resetDropdown('sel-dist', '— Seleccione —');
+  resetDropdown('sel-estab', '— Seleccione Distrito primero —');
+  document.getElementById('btn-confirmar').disabled = true;
+  selectedPlaza = null;
+
+  if (!diresa || !prov) return;
+
+  const dists = Object.keys((diresaMap[diresa] || {})[prov] || {}).sort();
+  const selDist = document.getElementById('sel-dist');
+  selDist.disabled = false;
+  dists.forEach(d => selDist.insertAdjacentHTML('beforeend', `<option value="${esc(d)}">${esc(d)}</option>`));
+  clearPlazaStatus();
+}
+
+function onDistritoChange() {
+  const diresa = document.getElementById('sel-diresa').value;
+  const prov = document.getElementById('sel-prov').value;
+  const dist = document.getElementById('sel-dist').value;
+  resetDropdown('sel-estab', '— Seleccione —');
+  document.getElementById('btn-confirmar').disabled = true;
+  selectedPlaza = null;
+
+  if (!diresa || !prov || !dist) return;
+
+  const estabs = (diresaMap[diresa]?.[prov]?.[dist] || []).sort((a,b) => a.nombre_establecimiento.localeCompare(b.nombre_establecimiento));
+  const selEstab = document.getElementById('sel-estab');
+  selEstab.disabled = false;
+  estabs.forEach(p => {
+    const tomada = getPlazaTomada(p.index);
+    const label = p.nombre_establecimiento + (tomada ? ' [TOMADA]' : '');
+    selEstab.insertAdjacentHTML('beforeend', `<option value="${p.index}" ${tomada ? 'style="color:var(--red-light)"' : ''}>${esc(label)}</option>`);
+  });
+  clearPlazaStatus();
+}
+
+function onEstabChange() {
+  const idx = document.getElementById('sel-estab').value;
+  document.getElementById('btn-confirmar').disabled = true;
+  selectedPlaza = null;
+  clearPlazaStatus();
+
+  if (idx === '') return;
+
+  const plaza = plazas.find(p => String(p.index) === String(idx));
+  if (!plaza) return;
+
+  // Auto-set institución
+  const selInst = document.getElementById('sel-inst');
+  for (let opt of selInst.options) {
+    if (opt.value === plaza.institucion) { selInst.value = plaza.institucion; break; }
+  }
+
+  const tomada = getPlazaTomada(plaza.index);
+  const statusEl = document.getElementById('plaza-status');
+  if (tomada) {
+    statusEl.className = 'error';
+    const adjNombre = tomada.adjudicado_por || 'Candidato anterior';
+    statusEl.textContent = `⚠️ Esta plaza ya fue adjudicada por ${adjNombre} (Adj. #${tomada.numero_adjudicacion}). Seleccione otra.`;
+    statusEl.style.display = 'block';
+    document.getElementById('btn-confirmar').disabled = true;
+    selectedPlaza = null;
+  } else {
+    selectedPlaza = plaza;
+    statusEl.className = 'ok';
+    statusEl.textContent = `✓ Plaza disponible · ${plaza.grado_dificultad} · ${plaza.categoria} · ${plaza.presupuesto}${plaza.zaf === 'SI' ? ' · ZAF' : ''}${plaza.ze === 'SI' ? ' · ZE' : ''}`;
+    statusEl.style.display = 'block';
+    document.getElementById('btn-confirmar').disabled = timerSeconds <= 0;
+  }
+}
+
+function clearPlazaStatus() {
+  const el = document.getElementById('plaza-status');
+  el.style.display = 'none';
+  el.className = '';
+}
+
+// ── Adjudicación ──────────────────────────────
+async function confirmarAdjudicacion() {
+  if (!modalCandidato || !selectedPlaza) return;
+  if (timerSeconds <= 0) {
+    alert('El tiempo se agotó. Usa "No adjudicó / Pasar" o cierra y registra manualmente.');
+    return;
+  }
+
+  stopTimer();
+  document.getElementById('btn-confirmar').disabled = true;
+  document.getElementById('btn-confirmar').textContent = 'Guardando...';
+
+  const diresa = document.getElementById('sel-diresa').value;
+  const inst = document.getElementById('sel-inst').value;
+  const prov = document.getElementById('sel-prov').value;
+  const dist = document.getElementById('sel-dist').value;
+  const numAdj = Object.keys(adjudicaciones).length + 1;
+
+  const adjData = {
+    numero_adjudicacion: numAdj,
+    candidato_rank: modalCandidato.rank,
+    candidato_nombre: modalCandidato.apellidos_nombres,
+    candidato_puntaje: Number(modalCandidato.puntaje_final),
+    diresa: diresa,
+    institucion: inst,
+    provincia: prov,
+    distrito: dist,
+    establecimiento: selectedPlaza.nombre_establecimiento,
+    nombre_establecimiento: selectedPlaza.nombre_establecimiento,
+    grado_dificultad: selectedPlaza.grado_dificultad,
+    categoria: selectedPlaza.categoria,
+    codigo_renipress: selectedPlaza.codigo_renipress,
+    oportunidades_usadas: modalOportunidad,
+    estado: 'adjudicado',
+    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+  };
+
+  const plazaData = {
+    adjudicado_por: modalCandidato.apellidos_nombres,
+    candidato_rank: modalCandidato.rank,
+    numero_adjudicacion: numAdj,
+    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+  };
+
+  if (!FIREBASE_CONFIGURED) {
+    // Local only mode
+    const localId = 'local_' + Date.now();
+    adjudicaciones[localId] = { ...adjData, timestamp: null };
+    plazasTomadas[String(selectedPlaza.index)] = { ...plazaData, timestamp: null };
+    updateStats(); renderCandidatos(); renderPlazas(); renderHistorial();
+    closeModal();
+    return;
+  }
+
+  try {
+    // Check plaza not taken (race condition guard)
+    const plazaDoc = await db.collection('plazas_tomadas').doc(String(selectedPlaza.index)).get();
+    if (plazaDoc.exists) {
+      const statusEl = document.getElementById('plaza-status');
+      statusEl.className = 'error';
+      statusEl.textContent = '⚠️ Esta plaza acaba de ser adjudicada por otro usuario. Seleccione otra.';
+      statusEl.style.display = 'block';
+      document.getElementById('btn-confirmar').textContent = '✓ Confirmar Adjudicación';
+      startTimer();
+      return;
+    }
+
+    const batch = db.batch();
+    batch.set(db.collection('adjudicaciones').doc(), adjData);
+    batch.set(db.collection('plazas_tomadas').doc(String(selectedPlaza.index)), plazaData);
+    await batch.commit();
+    closeModal();
+  } catch(e) {
+    alert('Error al guardar: ' + e.message);
+    document.getElementById('btn-confirmar').textContent = '✓ Confirmar Adjudicación';
+    document.getElementById('btn-confirmar').disabled = false;
+    startTimer();
+  }
+}
+
+async function pasarAlSiguiente() {
+  if (!modalCandidato) return;
+  stopTimer();
+
+  const canReintentar = modalOportunidad < 3;
+
+  if (canReintentar && selectedPlaza === null) {
+    // No seleccionó nada — dar segunda oportunidad
+    const opp = modalOportunidad + 1;
+    const label = opp === 2 ? 'segunda' : 'tercera';
+    if (!confirm(`¿Dar ${label} oportunidad a ${modalCandidato.apellidos_nombres}?`)) {
+      // Marcar como no adjudicó definitivamente
+      await registrarNoAdjudica();
+    } else {
+      openModal(modalCandidato.rank, opp);
+    }
+    return;
+  }
+
+  await registrarNoAdjudica();
+}
+
+async function registrarNoAdjudica() {
+  const numAdj = Object.keys(adjudicaciones).length + 1;
+  const data = {
+    numero_adjudicacion: numAdj,
+    candidato_rank: modalCandidato.rank,
+    candidato_nombre: modalCandidato.apellidos_nombres,
+    candidato_puntaje: Number(modalCandidato.puntaje_final),
+    oportunidades_usadas: modalOportunidad,
+    estado: 'no_adjudico',
+    timestamp: FIREBASE_CONFIGURED ? firebase.firestore.FieldValue.serverTimestamp() : null,
+  };
+
+  if (!FIREBASE_CONFIGURED) {
+    const id = 'local_' + Date.now();
+    adjudicaciones[id] = data;
+    updateStats(); renderCandidatos(); renderHistorial();
+    closeModal();
+    return;
+  }
+
+  try {
+    await db.collection('adjudicaciones').add(data);
+    closeModal();
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+// ── Export Excel ──────────────────────────────
+function exportExcel() {
+  const sorted = Object.values(adjudicaciones).sort((a,b) => a.numero_adjudicacion - b.numero_adjudicacion);
+  const rows = sorted.map(a => ({
+    'N° Adjudicación': a.numero_adjudicacion,
+    'Rank': a.candidato_rank,
+    'Apellidos y Nombres': a.candidato_nombre,
+    'Puntaje': a.candidato_puntaje,
+    'Estado': a.estado === 'adjudicado' ? 'ADJUDICÓ' : 'NO ADJUDICÓ',
+    'DIRESA': a.diresa || '',
+    'Institución': a.institucion || '',
+    'Provincia': a.provincia || '',
+    'Distrito': a.distrito || '',
+    'Establecimiento': a.nombre_establecimiento || a.establecimiento || '',
+    'Grado Dificultad': a.grado_dificultad || '',
+    'Categoría': a.categoria || '',
+    'RENIPRESS': a.codigo_renipress || '',
+    'Oportunidades usadas': a.oportunidades_usadas || 1,
+    'Hora': a.timestamp ? new Date(a.timestamp.seconds * 1000).toLocaleString('es-PE') : '',
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Adjudicaciones');
+  XLSX.writeFile(wb, `SERUMS_2026_Adjudicaciones_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+// ── Start ─────────────────────────────────────
+init();
+</script>
+</body>
+</html>
