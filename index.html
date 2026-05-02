@@ -4,8 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SERUMS 2026-I — Adjudicación Medicina</title>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 <style>
 :root {
@@ -247,7 +245,7 @@ tr:hover td { background: rgba(255,255,255,.02); }
 </div>
 
 <div id="firebase-warning">
-  ⚠️ Firebase no configurado — los cambios NO se sincronizarán en tiempo real. Edita <code>firebaseConfig</code> en el código.
+  ⚠️ Sin conexión al servidor — trabajando en modo local (los cambios NO se sincronizan). Reintentando…
 </div>
 
 <div id="header">
@@ -433,19 +431,12 @@ tr:hover td { background: rgba(255,255,255,.02); }
 
 <script>
 // ═══════════════════════════════════════════════
-//  FIREBASE CONFIG — REEMPLAZA CON TUS VALORES
+//  Cloudflare D1 backend (Pages Functions)
 // ═══════════════════════════════════════════════
-const firebaseConfig = {
-  apiKey: "TU_API_KEY",
-  authDomain: "TU_PROYECTO.firebaseapp.com",
-  projectId: "TU_PROYECTO_ID",
-  storageBucket: "TU_PROYECTO.appspot.com",
-  messagingSenderId: "TU_MESSAGING_ID",
-  appId: "TU_APP_ID"
-};
-// ═══════════════════════════════════════════════
-
-const FIREBASE_CONFIGURED = !firebaseConfig.apiKey.startsWith("TU_");
+const API_BASE = '/api';
+const POLL_INTERVAL_MS = 3000;  // refresca cada 3 segundos
+let pollTimer = null;
+let apiOnline = true;
 
 // ── State ─────────────────────────────────────
 let plazas = [];
@@ -506,16 +497,14 @@ async function init() {
     updateStats();
     renderTendencias();
 
-    if (FIREBASE_CONFIGURED) {
-      setLoadingMsg("Conectando a Firebase...");
-      initFirebase();
-    } else {
-      document.getElementById('firebase-warning').style.display = 'block';
-      hideLoading();
-      renderCandidatos();
-      renderPlazas();
-      renderHistorial();
-    }
+    setLoadingMsg("Conectando con servidor...");
+    await fetchEstado(true);   // primer fetch sincronizado
+    hideLoading();
+    renderTendencias();
+    renderCandidatos();
+    renderPlazas();
+    renderHistorial();
+    startPolling();
   } catch(e) {
     document.getElementById('loading-msg').textContent = 'Error: ' + e.message;
     console.error(e);
@@ -529,59 +518,69 @@ function hideLoading() {
   document.getElementById('loading').style.display = 'none';
 }
 
-// ── Firebase ──────────────────────────────────
-let db;
-function initFirebase() {
-  firebase.initializeApp(firebaseConfig);
-  db = firebase.firestore();
+// ── API Client + Polling ──────────────────────
+async function fetchEstado(silent = false) {
+  try {
+    const r = await fetch(API_BASE + '/estado', { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    setApiStatus(true);
 
-  let adjLoaded = false, plazasLoaded = false;
-
-  db.collection('adjudicaciones').orderBy('numero_adjudicacion', 'asc')
-    .onSnapshot(snap => {
-      // Keep initial entries, replace only Firestore-sourced ones
-      for (const k of Object.keys(adjudicaciones)) {
-        if (!adjudicaciones[k]._initial) delete adjudicaciones[k];
-      }
-      snap.forEach(doc => { adjudicaciones[doc.id] = doc.data(); });
-      if (!adjLoaded) { adjLoaded = true; checkBothLoaded(); }
-      updateStats();
-      renderTendencias();
-      renderCandidatos();
-      renderHistorial();
-    }, err => {
-      console.error('Firestore adjudicaciones error:', err);
-      document.getElementById('firebase-warning').style.display = 'block';
-      document.getElementById('firebase-warning').textContent = '⚠️ Error Firestore: ' + err.message;
-    });
-
-  db.collection('plazas_tomadas')
-    .onSnapshot(snap => {
-      // Reset to initial snapshot, then overlay Firestore docs
-      plazasTomadas = {};
-      Object.assign(plazasTomadas, initialPlazasTomadas);
-      // Re-add unmapped (cupos=0 sin candidato)
-      for (const p of plazas) {
-        if (p.cupos_restantes === 0 && !plazasTomadas[String(p.index)]) {
-          plazasTomadas[String(p.index)] = { adjudicado_por: '', numero_adjudicacion: null, _unmapped: true };
-        }
-      }
-      snap.forEach(doc => { plazasTomadas[doc.id] = doc.data(); });
-      if (!plazasLoaded) { plazasLoaded = true; checkBothLoaded(); }
-      updateStats();
-      renderPlazas();
-      if (modalCandidato && selectedPlaza) onEstabChange();
-    });
-
-  function checkBothLoaded() {
-    if (adjLoaded && plazasLoaded) {
-      hideLoading();
-      renderTendencias();
-      renderCandidatos();
-      renderPlazas();
-      renderHistorial();
+    // Limpiar entradas no-iniciales (las del backend) — luego agregar las nuevas
+    for (const k of Object.keys(adjudicaciones)) {
+      if (!adjudicaciones[k]._initial) delete adjudicaciones[k];
     }
+    for (const a of (data.adjudicaciones || [])) {
+      adjudicaciones['srv_' + a.id] = a;
+    }
+
+    // Reset plazas_tomadas: snapshot inicial + cupos=0 sin asignar + servidor
+    plazasTomadas = {};
+    Object.assign(plazasTomadas, initialPlazasTomadas);
+    for (const p of plazas) {
+      if (p.cupos_restantes === 0 && !plazasTomadas[String(p.index)]) {
+        plazasTomadas[String(p.index)] = { adjudicado_por: '', numero_adjudicacion: null, _unmapped: true };
+      }
+    }
+    Object.assign(plazasTomadas, data.plazas_tomadas || {});
+
+    if (!silent) {
+      updateStats();
+      renderTendencias();
+      renderCandidatos();
+      renderPlazas();
+      renderHistorial();
+      if (modalCandidato && selectedPlaza) onEstabChange();
+    } else {
+      updateStats();
+    }
+  } catch (err) {
+    console.warn('fetchEstado failed:', err.message);
+    setApiStatus(false);
   }
+}
+
+function setApiStatus(online) {
+  if (online === apiOnline) return;
+  apiOnline = online;
+  const banner = document.getElementById('firebase-warning');
+  banner.style.display = online ? 'none' : 'block';
+}
+
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(() => fetchEstado(false), POLL_INTERVAL_MS);
+}
+
+// Calcula el siguiente número de adjudicación a usar
+function nextNumeroAdjudicacion() {
+  const baseNum = estadoInicial?.ultimo_puesto || 0;
+  // El máximo entre baseNum y el max actual + 1
+  let maxNum = baseNum;
+  for (const a of Object.values(adjudicaciones)) {
+    if (a.numero_adjudicacion > maxNum) maxNum = a.numero_adjudicacion;
+  }
+  return maxNum + 1;
 }
 
 // ── Lookups ───────────────────────────────────
@@ -908,8 +907,12 @@ function renderHistorial() {
 
   list.innerHTML = filtered.map(a => {
     const isAdj = a.estado === 'adjudicado';
-    const ts = a.timestamp ? new Date(a.timestamp.seconds * 1000).toLocaleTimeString('es-PE')
-      : (a._initial ? 'Pre-registro' : '—');
+    let ts = '—';
+    if (a._initial) ts = 'Pre-registro';
+    else if (a.timestamp) {
+      const ms = typeof a.timestamp === 'object' ? a.timestamp.seconds * 1000 : Number(a.timestamp);
+      ts = new Date(ms).toLocaleTimeString('es-PE');
+    }
     const plazaInfo = isAdj
       ? `<div class="hist-plaza">✓ ${esc(a.nombre_establecimiento || a.establecimiento || '')} — ${esc(a.provincia || '')} / ${esc(a.distrito || '')}</div>
          <div class="hist-meta">${esc(a.diresa || '')} · ${esc(a.institucion || '')} · ${esc(a.grado_dificultad || '')} · ${esc(a.categoria || '')}</div>`
@@ -1131,73 +1134,64 @@ async function confirmarAdjudicacion() {
   }
 
   stopTimer();
-  document.getElementById('btn-confirmar').disabled = true;
-  document.getElementById('btn-confirmar').textContent = 'Guardando...';
+  const btn = document.getElementById('btn-confirmar');
+  btn.disabled = true;
+  btn.textContent = 'Guardando...';
 
-  const diresa = document.getElementById('sel-diresa').value;
-  const inst = document.getElementById('sel-inst').value;
-  const prov = document.getElementById('sel-prov').value;
-  const dist = document.getElementById('sel-dist').value;
-  const numAdj = Object.keys(adjudicaciones).length + 1;
+  const numAdj = nextNumeroAdjudicacion();
 
-  const adjData = {
-    numero_adjudicacion: numAdj,
-    candidato_rank: modalCandidato.rank,
-    candidato_nombre: modalCandidato.apellidos_nombres,
-    candidato_puntaje: Number(modalCandidato.puntaje_final),
-    diresa: diresa,
-    institucion: inst,
-    provincia: prov,
-    distrito: dist,
-    establecimiento: selectedPlaza.nombre_establecimiento,
-    nombre_establecimiento: selectedPlaza.nombre_establecimiento,
-    grado_dificultad: selectedPlaza.grado_dificultad,
-    categoria: selectedPlaza.categoria,
-    codigo_renipress: selectedPlaza.codigo_renipress,
+  const payload = {
+    candidato: {
+      rank: modalCandidato.rank,
+      apellidos_nombres: modalCandidato.apellidos_nombres,
+      puntaje_final: Number(modalCandidato.puntaje_final),
+    },
+    plaza: {
+      index: selectedPlaza.index,
+      diresa: selectedPlaza.diresa,
+      institucion: selectedPlaza.institucion,
+      provincia: selectedPlaza.provincia,
+      distrito: selectedPlaza.distrito,
+      nombre_establecimiento: selectedPlaza.nombre_establecimiento,
+      grado_dificultad: selectedPlaza.grado_dificultad,
+      categoria: selectedPlaza.categoria,
+      codigo_renipress: selectedPlaza.codigo_renipress,
+    },
     oportunidades_usadas: modalOportunidad,
-    estado: 'adjudicado',
-    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-  };
-
-  const plazaData = {
-    adjudicado_por: modalCandidato.apellidos_nombres,
-    candidato_rank: modalCandidato.rank,
     numero_adjudicacion: numAdj,
-    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
   };
-
-  if (!FIREBASE_CONFIGURED) {
-    // Local only mode
-    const localId = 'local_' + Date.now();
-    adjudicaciones[localId] = { ...adjData, timestamp: null };
-    plazasTomadas[String(selectedPlaza.index)] = { ...plazaData, timestamp: null };
-    updateStats(); renderCandidatos(); renderPlazas(); renderHistorial();
-    closeModal();
-    return;
-  }
 
   try {
-    // Check plaza not taken (race condition guard)
-    const plazaDoc = await db.collection('plazas_tomadas').doc(String(selectedPlaza.index)).get();
-    if (plazaDoc.exists) {
+    const r = await fetch(API_BASE + '/adjudicar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+
+    if (!r.ok || data.error) {
       const statusEl = document.getElementById('plaza-status');
-      statusEl.className = 'error';
-      statusEl.textContent = '⚠️ Esta plaza acaba de ser adjudicada por otro usuario. Seleccione otra.';
-      statusEl.style.display = 'block';
-      document.getElementById('btn-confirmar').textContent = '✓ Confirmar Adjudicación';
+      if (data.error === 'plaza_taken') {
+        statusEl.className = 'error';
+        statusEl.textContent = '⚠️ Esta plaza acaba de ser adjudicada por otro usuario. Seleccione otra.';
+        statusEl.style.display = 'block';
+        await fetchEstado(false);  // refrescar para ver la nueva
+      } else {
+        alert('Error: ' + (data.message || data.error || 'desconocido'));
+      }
+      btn.textContent = '✓ Confirmar Adjudicación';
+      btn.disabled = false;
       startTimer();
       return;
     }
 
-    const batch = db.batch();
-    batch.set(db.collection('adjudicaciones').doc(), adjData);
-    batch.set(db.collection('plazas_tomadas').doc(String(selectedPlaza.index)), plazaData);
-    await batch.commit();
+    // OK — refrescar y cerrar
+    await fetchEstado(false);
     closeModal();
   } catch(e) {
-    alert('Error al guardar: ' + e.message);
-    document.getElementById('btn-confirmar').textContent = '✓ Confirmar Adjudicación';
-    document.getElementById('btn-confirmar').disabled = false;
+    alert('Error de red: ' + e.message);
+    btn.textContent = '✓ Confirmar Adjudicación';
+    btn.disabled = false;
     startTimer();
   }
 }
@@ -1225,30 +1219,31 @@ async function pasarAlSiguiente() {
 }
 
 async function registrarNoAdjudica() {
-  const numAdj = Object.keys(adjudicaciones).length + 1;
-  const data = {
-    numero_adjudicacion: numAdj,
-    candidato_rank: modalCandidato.rank,
-    candidato_nombre: modalCandidato.apellidos_nombres,
-    candidato_puntaje: Number(modalCandidato.puntaje_final),
+  const numAdj = nextNumeroAdjudicacion();
+  const payload = {
+    candidato: {
+      rank: modalCandidato.rank,
+      apellidos_nombres: modalCandidato.apellidos_nombres,
+      puntaje_final: Number(modalCandidato.puntaje_final),
+    },
     oportunidades_usadas: modalOportunidad,
-    estado: 'no_adjudico',
-    timestamp: FIREBASE_CONFIGURED ? firebase.firestore.FieldValue.serverTimestamp() : null,
+    numero_adjudicacion: numAdj,
   };
-
-  if (!FIREBASE_CONFIGURED) {
-    const id = 'local_' + Date.now();
-    adjudicaciones[id] = data;
-    updateStats(); renderCandidatos(); renderHistorial();
-    closeModal();
-    return;
-  }
-
   try {
-    await db.collection('adjudicaciones').add(data);
+    const r = await fetch(API_BASE + '/no-adjudico', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    if (!r.ok || data.error) {
+      alert('Error: ' + (data.message || data.error));
+      return;
+    }
+    await fetchEstado(false);
     closeModal();
   } catch(e) {
-    alert('Error: ' + e.message);
+    alert('Error de red: ' + e.message);
   }
 }
 
@@ -1270,7 +1265,9 @@ function exportExcel() {
     'Categoría': a.categoria || '',
     'RENIPRESS': a.codigo_renipress || '',
     'Oportunidades usadas': a.oportunidades_usadas || 1,
-    'Hora': a.timestamp ? new Date(a.timestamp.seconds * 1000).toLocaleString('es-PE') : '',
+    'Hora': a.timestamp
+      ? new Date(typeof a.timestamp === 'object' ? a.timestamp.seconds * 1000 : Number(a.timestamp)).toLocaleString('es-PE')
+      : (a._initial ? 'Pre-registro (1-650)' : ''),
   }));
 
   const ws = XLSX.utils.json_to_sheet(rows);

@@ -1,0 +1,11 @@
+name = "adjudicaci-nserums2026-ii"
+compatibility_date = "2026-01-01"
+pages_build_output_dir = "."
+
+# D1 Database binding
+# IMPORTANTE: Después de crear la D1 con `npx wrangler d1 create serums-2026`,
+# pegar aquí el database_id que se imprime en la consola.
+[[d1_databases]]
+binding = "DB"
+database_name = "serums-2026"
+database_id = "REEMPLAZAR_DESPUES_DE_npx_wrangler_d1_create"
