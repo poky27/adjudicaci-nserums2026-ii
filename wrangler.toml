@@ -8,4 +8,4 @@ pages_build_output_dir = "."
 [[d1_databases]]
 binding = "DB"
 database_name = "serums-2026"
-database_id = "REEMPLAZAR_DESPUES_DE_npx_wrangler_d1_create"
+database_id = "5f7ee572-7107-4db1-9d03-ec91e1812671"
