@@ -349,6 +349,7 @@ tr:hover td { background: rgba(255,255,255,.02); }
     <select id="filter-estado-plaza" onchange="filterPlazas()">
       <option value="">Todas</option>
       <option value="libre">🟢 Libres</option>
+      <option value="parcial">🟡 Parciales (multi-plaza)</option>
       <option value="tomada">🔴 Tomadas</option>
     </select>
   </div>
@@ -864,8 +865,10 @@ function renderPlazas() {
 
   filteredPlazas = plazas.filter(p => {
     const tomada = !!getPlazaTomada(p.index);
-    if (fEstado === 'libre' && tomada) return false;
+    const esParcial = p.estado_actual === 'parcial' && !tomada;
+    if (fEstado === 'libre' && (tomada || esParcial)) return false;
     if (fEstado === 'tomada' && !tomada) return false;
+    if (fEstado === 'parcial' && !esParcial) return false;
     if (fDiresa && p.diresa !== fDiresa) return false;
     if (fInst && p.institucion !== fInst) return false;
     if (fProv && p.provincia !== fProv) return false;
