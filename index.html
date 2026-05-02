@@ -175,8 +175,8 @@ tr:hover td { background: rgba(255,255,255,.02); }
 .spinner { width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--blue-light); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* Firebase warning */
-#firebase-warning {
+/* API connection warning */
+#api-warning {
   background: rgba(220,38,38,.1); border: 1px solid var(--red); color: var(--red-light);
   padding: 10px 20px; font-size: 13px; text-align: center; display: none;
 }
@@ -247,8 +247,8 @@ tr:hover td { background: rgba(255,255,255,.02); }
   <p id="loading-msg">Cargando datos...</p>
 </div>
 
-<div id="firebase-warning">
-  ⚠️ Sin conexión al servidor — trabajando en modo local (los cambios NO se sincronizan). Reintentando…
+<div id="api-warning">
+  ⚠️ Sin conexión al servidor — trabajando en modo local. Reintentando…
 </div>
 
 <div id="header">
@@ -444,7 +444,7 @@ let apiOnline = true;
 // ── State ─────────────────────────────────────
 let plazas = [];
 let candidatos = [];
-let adjudicaciones = {};    // { docId: {...} } — Firestore + iniciales merged
+let adjudicaciones = {};    // { docId: {...} } — D1 backend + iniciales merged
 let plazasTomadas = {};     // { plazaIndex: { adjudicado_por, numero_adjudicacion } } — merged
 let estadoInicial = null;   // { ultimo_puesto, fecha_corte, adjudicaciones, plazas_tomadas }
 let initialAdjMap = {};     // candidato_rank -> adjudicacion (snapshot)
@@ -566,7 +566,7 @@ async function fetchEstado(silent = false) {
 function setApiStatus(online) {
   if (online === apiOnline) return;
   apiOnline = online;
-  const banner = document.getElementById('firebase-warning');
+  const banner = document.getElementById('api-warning');
   banner.style.display = online ? 'none' : 'block';
 }
 
