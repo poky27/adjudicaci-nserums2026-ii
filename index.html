@@ -290,7 +290,7 @@ tr:hover td { background: rgba(255,255,255,.02); }
 <div id="panel-tendencias" class="panel active">
   <div id="tendencias-scroll">
     <div class="dash-info-banner">
-      Datos al corte de <strong id="dash-corte">1 de mayo de 2026</strong> · Puesto actual: <strong id="dash-puesto">650</strong> · Pendientes: <strong id="dash-pendientes">—</strong>
+      Datos al corte de <strong id="dash-corte">1 de mayo de 2026</strong> · Puesto actual: <strong id="dash-puesto">650</strong> · Pendientes: <strong id="dash-pendientes">—</strong> <span style="color:var(--text2)">(puestos <span id="dash-rango">651–2600</span> según cronograma)</span>
     </div>
 
     <div class="dash-section">
@@ -714,8 +714,12 @@ function renderTendencias() {
   document.getElementById('hero-tasa').textContent = tasa.toFixed(1) + '%';
 
   if (estadoInicial) {
-    const pend = candidatos.length - estadoInicial.ultimo_puesto;
+    // Cronograma oficial: solo puestos 1-2600 adjudican (no todos los 6033)
+    const PUESTOS_CRONOGRAMA = 2600;
+    const ultimoActual = estadoInicial.ultimo_puesto || 650;
+    const pend = Math.max(0, PUESTOS_CRONOGRAMA - ultimoActual);
     document.getElementById('dash-pendientes').textContent = pend.toLocaleString('es-PE');
+    document.getElementById('dash-rango').textContent = `${ultimoActual + 1}–${PUESTOS_CRONOGRAMA}`;
   }
 
   // GD breakdown — usa n_plazas y cupos_restantes
