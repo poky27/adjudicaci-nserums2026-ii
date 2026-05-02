@@ -203,7 +203,10 @@ tr:hover td { background: rgba(255,255,255,.02); }
 .hero-noadj .num { color: var(--red-light); }
 .hero-tasa .num { color: var(--yellow-light); }
 
-.gd-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap: 12px; }
+.gd-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+@media (max-width: 720px) {
+  .gd-grid { grid-template-columns: repeat(2, 1fr); }
+}
 .gd-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; text-align: center; position: relative; overflow: hidden; }
 .gd-card::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; }
 .gd-card.g1::before { background: #38bdf8; }
@@ -469,7 +472,6 @@ async function init() {
     candidatos = await rCandidatos.json();
     if (rEstado && rEstado.ok) {
       estadoInicial = await rEstado.json();
-      // Build snapshot maps + seed local state
       for (const a of estadoInicial.adjudicaciones || []) {
         const id = `inicial_${a.numero_adjudicacion}`;
         adjudicaciones[id] = { ...a, _initial: true };
@@ -477,9 +479,10 @@ async function init() {
       }
       Object.assign(plazasTomadas, estadoInicial.plazas_tomadas || {});
       Object.assign(initialPlazasTomadas, estadoInicial.plazas_tomadas || {});
-      // Seed plazas with cupos_restantes=0 that don't have a name match → "tomada (sin asignar)"
+      // Seed: solo plazas FULLY tomadas (cupos=0) sin candidato linkeado → "tomada (sin asignar)"
+      // Las "parciales" (algunos cupos libres) siguen disponibles para adjudicación.
       for (const p of plazas) {
-        if (p.cupos_restantes === 0 && !plazasTomadas[String(p.index)]) {
+        if (p.estado_actual === 'tomada' && !plazasTomadas[String(p.index)]) {
           plazasTomadas[String(p.index)] = {
             adjudicado_por: '',
             numero_adjudicacion: null,
@@ -538,7 +541,7 @@ async function fetchEstado(silent = false) {
     plazasTomadas = {};
     Object.assign(plazasTomadas, initialPlazasTomadas);
     for (const p of plazas) {
-      if (p.cupos_restantes === 0 && !plazasTomadas[String(p.index)]) {
+      if (p.estado_actual === 'tomada' && !plazasTomadas[String(p.index)]) {
         plazasTomadas[String(p.index)] = { adjudicado_por: '', numero_adjudicacion: null, _unmapped: true };
       }
     }
@@ -625,6 +628,30 @@ function populateFilters() {
 }
 
 // ── Stats ─────────────────────────────────────
+// Helpers para n_plazas/cupos (multi-plaza por establecimiento)
+function plazaTotalCount() {
+  return plazas.reduce((sum, p) => sum + (p.n_plazas || 1), 0);
+}
+function plazaLibresCount() {
+  // Sumar cupos_restantes de todas las plazas, restando 1 por cada adjudicación nueva
+  // que el frontend conoce. Las adjudicaciones iniciales ya están reflejadas en cupos_restantes.
+  let libres = 0;
+  for (const p of plazas) {
+    libres += (p.cupos_restantes || 0);
+  }
+  // Restar adjudicaciones NO iniciales que apuntan a plazas con cupos_restantes > 0 originalmente
+  for (const a of Object.values(adjudicaciones)) {
+    if (a._initial) continue;
+    if (a.estado !== 'adjudicado') continue;
+    if (a.plaza_index == null) continue;
+    libres -= 1;
+  }
+  return Math.max(0, libres);
+}
+function plazaTomadasCount() {
+  return plazaTotalCount() - plazaLibresCount();
+}
+
 function updateStats() {
   const allAdj = Object.values(adjudicaciones);
   const totalAdj = allAdj.filter(a => a.estado === 'adjudicado').length;
@@ -632,11 +659,8 @@ function updateStats() {
   const totalProcesados = totalAdj + totalNoAdj;
   const tasa = totalProcesados > 0 ? (totalAdj / totalProcesados * 100) : 0;
 
-  // Plazas restantes = plazas con cupos>0 (libres)
-  const totalLibres = plazas.filter(p => !plazasTomadas[String(p.index)]).length;
-
   document.getElementById('stat-adj').textContent = totalAdj.toLocaleString('es-PE');
-  document.getElementById('stat-libre').textContent = totalLibres.toLocaleString('es-PE');
+  document.getElementById('stat-libre').textContent = plazaLibresCount().toLocaleString('es-PE');
   document.getElementById('stat-noadj').textContent = totalNoAdj.toLocaleString('es-PE');
   document.getElementById('stat-tasa').textContent = tasa.toFixed(0) + '%';
 }
@@ -684,24 +708,32 @@ function renderTendencias() {
   const totalLibres = plazas.filter(p => !plazasTomadas[String(p.index)]).length;
 
   document.getElementById('hero-adj').textContent = totalAdj.toLocaleString('es-PE');
-  document.getElementById('hero-rest').textContent = totalLibres.toLocaleString('es-PE');
+  document.getElementById('hero-rest').textContent = plazaLibresCount().toLocaleString('es-PE');
   document.getElementById('hero-noadj').textContent = totalNoAdj.toLocaleString('es-PE');
   document.getElementById('hero-tasa').textContent = tasa.toFixed(1) + '%';
 
-  // Pendientes (apto-puesto > último_puesto y sin adjudicación)
   if (estadoInicial) {
     const pend = candidatos.length - estadoInicial.ultimo_puesto;
     document.getElementById('dash-pendientes').textContent = pend.toLocaleString('es-PE');
   }
 
-  // GD breakdown
+  // GD breakdown — usa n_plazas y cupos_restantes
   const gdGrid = document.getElementById('gd-grid');
   const gdLabels = ['GD-1','GD-2','GD-3','GD-4','GD-5'];
   let gdHtml = '';
   for (const gd of gdLabels) {
-    const total = plazas.filter(p => p.grado_dificultad === gd).length;
-    const tomadas = plazas.filter(p => p.grado_dificultad === gd && plazasTomadas[String(p.index)]).length;
-    const libres = total - tomadas;
+    let total = 0, libres = 0;
+    for (const p of plazas) {
+      if (p.grado_dificultad !== gd) continue;
+      total += (p.n_plazas || 1);
+      libres += (p.cupos_restantes || 0);
+    }
+    // Restar adjudicaciones nuevas en este GD
+    for (const a of Object.values(adjudicaciones)) {
+      if (a._initial || a.estado !== 'adjudicado' || a.grado_dificultad !== gd) continue;
+      libres = Math.max(0, libres - 1);
+    }
+    const tomadas = total - libres;
     const num = gd.replace('GD-','');
     gdHtml += `<div class="gd-card g${num}">
       <div class="gd-name">${gd}</div>
@@ -712,17 +744,24 @@ function renderTendencias() {
   }
   gdGrid.innerHTML = gdHtml;
 
-  // Departamento percentages
+  // Departamento percentages (con n_plazas)
   const deptStats = {};
   for (const p of plazas) {
     const d = p.departamento;
     if (!d) continue;
-    if (!deptStats[d]) deptStats[d] = { total: 0, tomadas: 0 };
-    deptStats[d].total++;
-    if (plazasTomadas[String(p.index)]) deptStats[d].tomadas++;
+    if (!deptStats[d]) deptStats[d] = { total: 0, libres: 0 };
+    deptStats[d].total += (p.n_plazas || 1);
+    deptStats[d].libres += (p.cupos_restantes || 0);
+  }
+  // Restar adjudicaciones nuevas
+  for (const a of Object.values(adjudicaciones)) {
+    if (a._initial || a.estado !== 'adjudicado') continue;
+    const dep = a.diresa;  // diresa ≈ departamento aquí
+    if (deptStats[dep]) deptStats[dep].libres = Math.max(0, deptStats[dep].libres - 1);
   }
   const deptArr = Object.entries(deptStats).map(([name, s]) => ({
-    name, total: s.total, tomadas: s.tomadas, pct: s.total ? (s.tomadas / s.total * 100) : 0
+    name, total: s.total, tomadas: s.total - s.libres,
+    pct: s.total ? ((s.total - s.libres) / s.total * 100) : 0
   })).sort((a,b) => b.pct - a.pct);
 
   const deptList = document.getElementById('dept-list');
@@ -861,9 +900,17 @@ function renderPlazas() {
 function plazaRow(p) {
   const tomada = getPlazaTomada(p.index);
   const cls = tomada ? 'plaza-tomada' : 'plaza-libre';
-  const estadoBadge = tomada
-    ? `<span class="badge badge-no">🔴 Tomada</span>`
-    : `<span class="badge badge-ok">🟢 Libre</span>`;
+  let estadoBadge;
+  if (tomada) {
+    estadoBadge = `<span class="badge badge-no">🔴 Tomada</span>`;
+  } else if (p.estado_actual === 'parcial') {
+    const taken = (p.n_plazas || 1) - (p.cupos_restantes || 0);
+    estadoBadge = `<span class="badge" style="background:rgba(217,119,6,.15);color:var(--yellow-light)">🟡 Parcial · ${p.cupos_restantes}/${p.n_plazas} libres</span>`;
+  } else if ((p.n_plazas || 1) > 1) {
+    estadoBadge = `<span class="badge badge-ok">🟢 Libre · ${p.cupos_restantes}/${p.n_plazas}</span>`;
+  } else {
+    estadoBadge = `<span class="badge badge-ok">🟢 Libre</span>`;
+  }
   const adjNombre = tomada ? `<small style="color:var(--text2)">${esc(tomada.adjudicado_por || '')}</small>` : '';
   const gdCls = gdClass(p.grado_dificultad);
   const zafCls = p.zaf === 'SI' ? 'zaf-si' : '';
